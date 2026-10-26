@@ -39,9 +39,10 @@ Then, in the container's `/w/playport`:
 
 ## Each build
 
-1. In the container: `XTOOL=/w/xtool-stub ./pp build --to stage`. The app
-   and verify stages are xtool's and do not run here; `/w/xtool-stub` is any
-   executable naming `INCREASED_MEMORY_LIMIT`, which the inputs check looks for.
+1. In the container: `XTOOL=/w/xtool-stub ./pp build --to notices` (`--to stage`
+   leaves Settings › About › Licences empty). The app and verify stages are
+   xtool's and do not run here; `/w/xtool-stub` is any executable naming
+   `INCREASED_MEMORY_LIMIT`, which the inputs check looks for.
 2. On the Mac: `app/Xcode/sync-staged.sh` copies the staged pieces out of the
    container and makes the simulator's copies (`simulator-staged.py`).
 3. `cp app/Xcode/Local.xcconfig.example app/Xcode/Local.xcconfig` once, with
@@ -49,12 +50,19 @@ Then, in the container's `/w/playport`:
    build the `Playport` scheme for the phone (Xcode, or
    `xcodebuild -allowProvisioningUpdates`), or run `app/Xcode/simulator-run.sh`
    for the simulator.
+4. The release variant (`Playport.app`, decision 0009), to compile it: on the Mac,
+   `python3 build/stages/stage-artifacts.py release` makes `app/.release`, then
+   `cd app/.release && PLAYPORT_VARIANT=release xcodebuild -scheme Playport
+   -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO build`. It is
+   another app with its own container, so installing it starts from setup.
 
 ## What differs from the Linux workstation
 
 - Host tools are arm64: `build/toolchain/rust.sh` and `build/idevice-crates.py`
   take the host's own Rust triple, and Wine's host-tools configure finds
-  llvm-mingw on an aarch64 host (Wine refuses `--without-mingw` there).
+  llvm-mingw on an aarch64 host (Wine refuses `--without-mingw` there). The
+  notices stage takes the Rust documentation from that toolchain and still
+  checks it against the locked x86_64 archive (the notice files are the same bytes).
 - The app is linked by Xcode's linker and signed by Xcode with the team's
   Increased Memory Limit; `pp verify` and `pp install` are not run.
 - The simulator build is the UI only: the device archives and frameworks are
