@@ -116,7 +116,8 @@ extension LaunchSettings {
                               x87Reduced: x87Reduced ?? base.x87Reduced, diskCache: diskCache ?? base.diskCache,
                               runtime: Self.keyItems(runtime, over: base.runtime),
                               graphicsOptions: Self.keyItems(graphicsOptions, over: base.graphicsOptions),
-                              virtualPad: virtualPad ?? base.virtualPad)
+                              virtualPad: virtualPad ?? base.virtualPad,
+                              virtualPadLayout: virtualPadLayout ?? base.virtualPadLayout)
     }
 
     /// `key=value` items as typed (Runtime keys, Graphics options) over the default's: the

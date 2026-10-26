@@ -46,6 +46,7 @@ struct RootView: View {
     @ObservedObject private var web = GameWebSheet.shared
     @ObservedObject private var restart = AppRestart.shared
     @ObservedObject private var setup = JitSetup.shared
+    @ObservedObject private var padEditor = PadLayoutEditor.shared
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The page has dived away after Play (0.7 s): the shell leaves the hierarchy.
@@ -110,6 +111,10 @@ struct RootView: View {
                     .statusBarHidden().persistentSystemOverlays(.hidden)
                     .zIndex(2)
                     .transition(.identity)
+            }
+            if padEditor.isOpen {
+                // A virtual gamepad layout being edited, from Settings or a game's menu (UI/PadLayoutEditor.swift).
+                PadLayoutEditorView().zIndex(3).transition(.identity)
             }
         }
         .onChange(of: launch.running) { _, running in

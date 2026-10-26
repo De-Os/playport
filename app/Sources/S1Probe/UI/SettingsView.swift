@@ -14,6 +14,8 @@
 // - Downloads: PlayportKit DownloadPreferences (the download queue reads
 //   them) and Steam Cloud's switch (SteamAccountModel.cloudKey).
 // - Controllers: every controller connected, with its battery (PadRouter).
+// - Virtual gamepad, a foldable's only: its layouts, each opening the editor
+//   (VirtualGamepad.swift, PadLayoutEditor.swift).
 // - Storage: free space and each game's size; A opens the game's page. Steamworks Shared
 //   (Steam's redistributables) with its size and Remove, and the emulator cache with Clear.
 // - Setup check: JIT, LocalDevVPN and memory (SetupCheckSettings.swift).
@@ -36,11 +38,11 @@ extension SettingsSection {
     static func isNavItem(_ id: String) -> Bool { id.hasPrefix("set:nav:") }
 
     /// The sections this build shows.
-    static var shown: [SettingsSection] {
+    @MainActor static var shown: [SettingsSection] {
         #if PLAYPORT_RELEASE
-        all(developer: false)
+        all(developer: false, foldable: Panel.isFoldable)
         #else
-        all(developer: true)
+        all(developer: true, foldable: Panel.isFoldable)
         #endif
     }
 }
@@ -155,6 +157,7 @@ struct SettingsView: View {
         case .graphics: GraphicsSettings()
         case .downloads: DownloadSettings()
         case .controllers: ControllerSettings()
+        case .virtualPad: VirtualPadSettings()
         case .storage: StorageSettings()
         case .setup: SetupCheckSettings()
         case .about:
@@ -183,7 +186,8 @@ enum SettingsRing {
         switch b {
         case .up, .down:
             if onList {
-                let s = nav.settingsSection.step(b == .up ? -1 : 1, developer: SettingsSection.shown.contains(.developer))
+                let s = nav.settingsSection.step(b == .up ? -1 : 1, developer: SettingsSection.shown.contains(.developer),
+                                                 foldable: SettingsSection.shown.contains(.virtualPad))
                 nav.settingsSection = s
                 focus.ring(s.navItem)
             } else {
@@ -330,7 +334,6 @@ private struct DownloadSettings: View {
 
 private struct ControllerSettings: View {
     @ObservedObject private var router = PadRouter.shared
-    @AppStorage(VirtualPadView.dpadOnTopKey) private var dpadOnTop = false
 
     var body: some View {
         SettingsNote(text: "Connect a controller in iOS Settings › Bluetooth. Playport and its games use the one you "
@@ -340,11 +343,6 @@ private struct ControllerSettings: View {
         }
         ForEach(Array(router.controllers.enumerated()), id: \.offset) { i, c in
             SettingsInfoRow(id: "controller:\(i)", title: c.name, subtitle: i == 0 ? "In use" : nil, value: battery(c))
-        }
-        // The on-screen controller a game can have on a foldable (VirtualGamepad.swift).
-        if Panel.isFoldable {
-            SettingsSwitchRow(id: "virtualPad:dpadOnTop", title: "Virtual gamepad: d-pad above the stick",
-                              subtitle: "PlayStation's layout; off is Xbox's, the left stick above", on: $dpadOnTop)
         }
         Color.clear.frame(height: 0).onAppear { router.refreshControllers() }
     }

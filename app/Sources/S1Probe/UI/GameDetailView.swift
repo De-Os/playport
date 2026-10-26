@@ -491,7 +491,7 @@ private struct GameDetailPage: View {
                 } else {
                     MemoryWarning(need: MemoryNeed.of(t, cohort: LibraryModel.cohort))
                     if installs.isBusy { Text("Starting a game pauses the download. It goes on when Playport reopens after the game.") }
-                    controllerLine
+                    controllerLine(t)
                 }
             } else if let g {
                 installNote(g)
@@ -503,8 +503,11 @@ private struct GameDetailPage: View {
     }
 
     @ViewBuilder
-    private var controllerLine: some View {
-        if controllers == 0 {
+    private func controllerLine(_ t: InstalledTitle) -> some View {
+        if Panel.isFoldable, launchSettings.settings(for: t.id).virtualPad == true {
+            // The on-screen controller is a pad of its own (VirtualGamepad.swift).
+            Text("The virtual gamepad is on for this game.")
+        } else if controllers == 0 {
             Text("No controller is connected. Connect it now: a game may not notice one connected later.")
                 .foregroundStyle(.orange)
         } else {
@@ -752,11 +755,29 @@ private struct GameDetailPage: View {
         // A foldable's open panel held upright: the game above, a controller under it (VirtualGamepad.swift).
         if Panel.isFoldable {
             let padOn = own.virtualPad ?? false
+            let layouts = PadLayoutStore.shared.all
+            let off = { settings.wrappedValue.virtualPad = nil; settings.wrappedValue.virtualPadLayout = nil }
             PadRow(id: "opt:virtualPad", title: "Virtual gamepad",
                    subtitle: "Phone open and upright: the game above, a controller below",
                    accessory: .toggle(padOn), changed: padOn, style: .plain, hint: padOn ? "Turn off" : "Turn on",
-                   reset: padOn ? { settings.wrappedValue.virtualPad = nil } : nil) {
-                settings.wrappedValue.virtualPad = padOn ? nil : true
+                   reset: padOn ? off : nil) {
+                // Turned on, the game keeps the default layout of now (Settings › Virtual gamepad).
+                if padOn { off() } else {
+                    settings.wrappedValue.virtualPad = true
+                    settings.wrappedValue.virtualPadLayout = layouts.defaultID
+                }
+            }
+            if padOn {
+                let current = layouts.layout(own.virtualPadLayout)
+                PadRow(id: "opt:virtualPadLayout", title: "Gamepad layout", value: current.name, accessory: .chevron,
+                       style: .plain) {
+                    PadModal.shared.picker(
+                        title: "Gamepad layout", context: "\(context) · Graphics",
+                        note: "Settings › Virtual gamepad edits them; in the game, hold ⌂.",
+                        options: layouts.layouts.map { PadOption(id: $0.id, label: $0.name,
+                                                                 detail: $0.id == layouts.defaultID ? "Default" : nil) },
+                        selected: current.id) { settings.wrappedValue.virtualPadLayout = $0 }
+                }
             }
         }
     }

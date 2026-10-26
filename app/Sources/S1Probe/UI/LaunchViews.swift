@@ -94,9 +94,10 @@ struct LaunchScreen: View {
 }
 
 extension LaunchScreen {
-    /// No controller (until one connects) and Steam signed out.
+    /// No controller (until one connects, and never with the virtual gamepad) and Steam signed out.
     private var notes: [String] {
-        setup.launchNotes.filter { router.controller == nil || $0 != SetupChecklist.noController }
+        let pad = router.controller != nil || VirtualGamepad.shared.enabled
+        return setup.launchNotes.filter { !pad || $0 != SetupChecklist.noController }
     }
 }
 

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The virtual gamepad (a game's option, LaunchSettings.virtualPad): on a
 // foldable's inner panel held upright (iPhone Duo), the game in the top half
-// and an on-screen Xbox controller in the bottom one. It is an XInput pad like
-// a GameController one: a slot of its own from the start of the launch (Unity
+// and an on-screen controller in the bottom one, laid out by one of the
+// player's layouts (PlayportKit PadLayout; Settings › Virtual gamepad and the
+// in-game menu change them, PadLayoutEditor.swift). It is an XInput pad like a
+// GameController one: a slot of its own from the start of the launch (Unity
 // lists controllers only when its input starts), its values through HostIO's
 // gate, and Home held opens Playport's in-game menu (HostIO.menuInput). Folded
 // or turned sideways the game has the whole panel and the pad rests.
@@ -10,8 +12,25 @@
 #if canImport(UIKit)
 import HostIO
 import HostIOKit
+import PlayportKit
 import SwiftUI
 import UIKit
+
+/// The layouts, kept in UserDefaults.
+@MainActor
+final class PadLayoutStore: ObservableObject {
+    static let shared = PadLayoutStore()
+    private static let key = "virtualPad.layouts"
+
+    @Published var all: PadLayouts {
+        didSet { UserDefaults.standard.set(try? JSONEncoder().encode(all), forKey: Self.key) }
+    }
+
+    private init() {
+        all = UserDefaults.standard.data(forKey: Self.key).flatMap { try? JSONDecoder().decode(PadLayouts.self, from: $0) }
+            ?? PadLayouts()
+    }
+}
 
 @MainActor
 final class VirtualGamepad: ObservableObject {
@@ -19,11 +38,30 @@ final class VirtualGamepad: ObservableObject {
 
     /// The launching game has the option on, on a foldable.
     @Published private(set) var enabled = false
+    /// The game's layout; nil, or one deleted since, is the default.
+    @Published private(set) var layoutID: String?
+    private var titleID: String?
     private var slot: Int?
     private var last = PadInput()
 
-    /// Before the launch: whether this game gets the pad.
-    func prepare(_ on: Bool) { enabled = on }
+    /// Before the launch: whether this game gets the pad, and in which layout.
+    func prepare(_ on: Bool, layout: String? = nil, titleID: String? = nil) {
+        enabled = on
+        layoutID = layout
+        self.titleID = titleID
+    }
+
+    var layout: PadLayout { PadLayoutStore.shared.all.layout(layoutID) }
+
+    /// The game's layout from now on, and at its next launch.
+    func choose(_ id: String) {
+        layoutID = id
+        if let titleID { LaunchSettingsStore.shared.binding(for: titleID).wrappedValue.virtualPadLayout = id }
+        HostIO.log("virtual gamepad: layout \"\(layout.name)\"")
+    }
+
+    /// The in-game menu's row: the next layout.
+    func cycle() { choose(PadLayoutStore.shared.all.next(after: layoutID).id) }
 
     /// As the game's host I/O starts: the pad's slot, at rest.
     func connect() {
@@ -34,7 +72,7 @@ final class VirtualGamepad: ObservableObject {
         }
         slot = s
         HostIO.publish(PadValues(), slot: s)
-        HostIO.log("virtual gamepad: XInput slot \(s)")
+        HostIO.log("virtual gamepad: XInput slot \(s), layout \"\(layout.name)\"")
     }
 
     /// The pad's controls now.
@@ -51,6 +89,7 @@ final class VirtualGamepad: ObservableObject {
 /// the whole screen the game's otherwise.
 struct GameArea: View {
     @ObservedObject private var pad = VirtualGamepad.shared
+    @ObservedObject private var layouts = PadLayoutStore.shared
 
     var body: some View {
         GeometryReader { g in
@@ -58,7 +97,8 @@ struct GameArea: View {
             VStack(spacing: 0) {
                 GameSurface().frame(height: split ? (g.size.height * 0.5).rounded() : g.size.height)
                 if split {
-                    VirtualPadControls().frame(maxWidth: .infinity, maxHeight: .infinity)
+                    VirtualPadControls(layout: layouts.all.layout(pad.layoutID))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .transition(.identity)
                 }
             }
@@ -68,25 +108,36 @@ struct GameArea: View {
     }
 }
 
-private struct VirtualPadControls: UIViewRepresentable {
+/// The pad, playing or (the editor's canvas) being laid out.
+struct VirtualPadControls: UIViewRepresentable {
+    var layout: PadLayout
+    var editing = false
+    var selected: PadControl?
+    var onEdit: ((PadLayout) -> Void)?
+    var onSelect: ((PadControl?) -> Void)?
+
     func makeUIView(context: Context) -> VirtualPadView { VirtualPadView() }
-    func updateUIView(_ view: VirtualPadView, context: Context) {}
+
+    func updateUIView(_ view: VirtualPadView, context: Context) {
+        view.editing = editing
+        if view.layout != layout { view.layout = layout }
+        if view.selected != selected { view.selected = selected }
+        view.onEdit = onEdit
+        view.onSelect = onSelect
+    }
 }
 
 /// The controller's face, drawn and touched in one view so that several fingers
 /// work at once and a finger slides from button to button: a stick follows the
 /// finger that went down on it; any other finger presses what it is over.
 /// A stick pressed again within 0.3 s of letting go is its click (LS, RS) while held.
-/// Xbox's layout, or PlayStation's with the left stick and the d-pad swapped
-/// (Settings › Controllers, dpadOnTopKey).
+/// Editing, a finger drags the control it went down on, which becomes the selected one.
 final class VirtualPadView: UIView {
-    /// UserDefaults: the d-pad above the left stick.
-    static let dpadOnTopKey = "virtualPad.dpadOnTop"
-
-    private enum Control: Hashable {
-        case leftStick, rightStick, dpad
-        case a, b, x, y, lb, rb, lt, rt, back, start, home
-    }
+    var layout = PadLayouts().defaultLayout { didSet { setNeedsLayout(); setNeedsDisplay() } }
+    var editing = false { didSet { if editing != oldValue { reset(); setNeedsDisplay() } } }
+    var selected: PadControl? { didSet { setNeedsDisplay() } }
+    var onEdit: ((PadLayout) -> Void)?
+    var onSelect: ((PadControl?) -> Void)?
 
     private struct Stick {
         var center = CGPoint.zero, radius: CGFloat = 0
@@ -96,13 +147,23 @@ final class VirtualPadView: UIView {
         var lastUp: TimeInterval = 0
     }
 
+    /// The face buttons, each one offset from their centre (+y down).
+    private enum Face { case a, b, x, y }
+    private static let face: [(Face, CGPoint)] = [(.a, CGPoint(x: 0, y: 1)), (.b, CGPoint(x: 1, y: 0)),
+                                                  (.x, CGPoint(x: -1, y: 0)), (.y, CGPoint(x: 0, y: -1))]
+
     private var left = Stick(), right = Stick()
-    private var dpadCenter = CGPoint.zero, dpadArm: CGFloat = 0
-    private var faceCenter = CGPoint.zero, faceOffset: CGFloat = 0, faceRadius: CGFloat = 0
-    private var rects: [Control: CGRect] = [:]
+    private var unit: CGFloat = 1
+    /// Where each control is drawn and touched.
+    private var frames: [PadControl: CGRect] = [:]
     /// What each finger not on a stick presses.
-    private var fingers: [UITouch: Set<Control>] = [:]
-    private var pressed: Set<Control> = []
+    private var fingers: [UITouch: Set<PadControl>] = [:]
+    private var pressed: Set<PadControl> = []
+    private var facePressed: Set<Face> = []
+    /// The d-pad's directions held now.
+    private var dpadDirection: (up: Bool, down: Bool, left: Bool, right: Bool) = (false, false, false, false)
+    /// Editing: the finger dragging a control, and its offset from the control's centre.
+    private var drag: (touch: UITouch, control: PadControl, offset: CGPoint)?
     private let haptic = UIImpactFeedbackGenerator(style: .light)
 
     init() {
@@ -114,47 +175,50 @@ final class VirtualPadView: UIView {
 
     required init?(coder: NSCoder) { fatalError("VirtualPadView is created in code") }
 
+    // MARK: geometry
+
+    /// A control's own size is for a 670x470 pt area: shoulders 96x46, Back, Home
+    /// and Start 44 across, a stick's radius 78, the d-pad's arm 64, the face
+    /// buttons 56 from their centre and 30 in radius.
+    private func scale(_ c: PadControl) -> CGFloat { CGFloat(layout[c].scale) * unit }
+
+    private func center(_ c: PadControl) -> CGPoint {
+        CGPoint(x: CGFloat(layout[c].x) * bounds.width, y: CGFloat(layout[c].y) * bounds.height)
+    }
+
+    private func frame(_ c: PadControl) -> CGRect {
+        let p = center(c), s = scale(c)
+        func box(_ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h) }
+        switch c {
+        case .leftTrigger, .leftBumper, .rightBumper, .rightTrigger: return box(96 * s, 46 * s)
+        case .back, .home, .start: return box(44 * s, 44 * s)
+        case .leftStick, .rightStick: return box(156 * s, 156 * s)
+        case .dpad: return box(128 * s, 128 * s)
+        case .face: return box(172 * s, 172 * s)
+        }
+    }
+
+    private func shows(_ c: PadControl) -> Bool { editing || !layout[c].hidden }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        let w = bounds.width, h = bounds.height
-        guard w > 0, h > 0 else { return }
-        let unit = min(w / 670, h / 470)
-        // Shoulders along the top edge.
-        let sw = 96 * unit, sh = 46 * unit, top = 12 * unit, edge = 18 * unit
-        rects[.lt] = CGRect(x: edge, y: top, width: sw, height: sh)
-        rects[.lb] = CGRect(x: edge + sw + 10 * unit, y: top, width: sw, height: sh)
-        rects[.rb] = CGRect(x: w - edge - 2 * sw - 10 * unit, y: top, width: sw, height: sh)
-        rects[.rt] = CGRect(x: w - edge - sw, y: top, width: sw, height: sh)
-        // Back, Home, Start in the middle under them.
-        let small = 44 * unit, my = top + sh + 30 * unit
-        for (c, fx) in [(Control.back, 0.4), (.home, 0.5), (.start, 0.6)] {
-            rects[c] = CGRect(x: w * fx - small / 2, y: my, width: small, height: small)
-        }
-        // Xbox layout: left stick and face buttons high, d-pad and right stick low;
-        // PlayStation's has the d-pad high and the left stick low.
-        let upper = h * 0.44, lower = h * 0.76
-        let high = CGPoint(x: w * 0.19, y: upper), low = CGPoint(x: w * 0.36, y: lower)
-        let dpadOnTop = UserDefaults.standard.bool(forKey: Self.dpadOnTopKey)
-        left.center = dpadOnTop ? low : high
-        left.radius = (dpadOnTop ? 70 : 78) * unit
-        right.center = CGPoint(x: w * 0.64, y: lower)
-        right.radius = 66 * unit
-        dpadCenter = dpadOnTop ? high : low
-        dpadArm = 64 * unit
-        faceCenter = CGPoint(x: w * 0.81, y: upper)
-        faceOffset = 56 * unit
-        faceRadius = 30 * unit
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        unit = min(bounds.width / 670, bounds.height / 470)
+        frames = Dictionary(uniqueKeysWithValues: PadControl.allCases.map { ($0, frame($0)) })
+        left.center = center(.leftStick); left.radius = 78 * scale(.leftStick)
+        right.center = center(.rightStick); right.radius = 78 * scale(.rightStick)
         setNeedsDisplay()
     }
 
     // MARK: touches
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if editing { return editBegan(touches) }
         for t in touches {
             let p = t.location(in: self)
-            if left.touch == nil, hits(left, p) {
+            if left.touch == nil, shows(.leftStick), hits(left, p) {
                 grab(&left, t, p)
-            } else if right.touch == nil, hits(right, p) {
+            } else if right.touch == nil, shows(.rightStick), hits(right, p) {
                 grab(&right, t, p)
             } else {
                 fingers[t] = controls(at: p)
@@ -164,6 +228,7 @@ final class VirtualPadView: UIView {
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if editing { return editMoved(touches) }
         for t in touches {
             let p = t.location(in: self)
             if t === left.touch { move(&left, p) }
@@ -177,12 +242,27 @@ final class VirtualPadView: UIView {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { lift(touches) }
 
     private func lift(_ touches: Set<UITouch>) {
+        if editing {
+            if let d = drag, touches.contains(d.touch) { drag = nil }
+            return
+        }
         for t in touches {
             if t === left.touch { release(&left, t) }
             else if t === right.touch { release(&right, t) }
             else { fingers[t] = nil }
         }
         update()
+    }
+
+    /// Nothing held: the editor took over, or gave the pad back.
+    private func reset() {
+        fingers = [:]
+        left.touch = nil; left.value = .zero; left.clicked = false
+        right.touch = nil; right.value = .zero; right.clicked = false
+        pressed = []
+        facePressed = []
+        dpadDirection = (false, false, false, false)
+        drag = nil
     }
 
     private func hits(_ s: Stick, _ p: CGPoint) -> Bool { hypot(p.x - s.center.x, p.y - s.center.y) <= s.radius * 1.35 }
@@ -211,34 +291,41 @@ final class VirtualPadView: UIView {
         s.lastUp = t.timestamp
     }
 
-    /// What a finger at p presses: a button under it, a d-pad direction (eight
-    /// ways), or the face button nearest to it.
-    private func controls(at p: CGPoint) -> Set<Control> {
-        for (c, r) in rects where r.insetBy(dx: -8, dy: -8).contains(p) { return [c] }
-        let dx = p.x - dpadCenter.x, dy = p.y - dpadCenter.y
-        // Its directions come from where the finger is (update()).
-        if abs(dx) <= dpadArm * 1.5, abs(dy) <= dpadArm * 1.5, hypot(dx, dy) >= dpadArm * 0.2 { return [.dpad] }
-        let fx = p.x - faceCenter.x, fy = p.y - faceCenter.y
-        if abs(fx) <= faceOffset + faceRadius * 1.6, abs(fy) <= faceOffset + faceRadius * 1.6 {
-            let face: [(Control, CGPoint)] = [(.a, CGPoint(x: 0, y: faceOffset)), (.b, CGPoint(x: faceOffset, y: 0)),
-                                              (.x, CGPoint(x: -faceOffset, y: 0)), (.y, CGPoint(x: 0, y: -faceOffset))]
-            let near = face.min { hypot(fx - $0.1.x, fy - $0.1.y) < hypot(fx - $1.1.x, fy - $1.1.y) }!
-            return [near.0]
+    /// What a finger at p presses: a button under it, the d-pad or the face
+    /// buttons (which of theirs comes from where the finger is, update()).
+    private func controls(at p: CGPoint) -> Set<PadControl> {
+        let buttons: [PadControl] = [.leftTrigger, .leftBumper, .rightBumper, .rightTrigger, .back, .home, .start]
+        for c in buttons where shows(c) && frames[c, default: .null].insetBy(dx: -8, dy: -8).contains(p) { return [c] }
+        if shows(.dpad) {
+            let o = center(.dpad), arm = 64 * scale(.dpad)
+            let dx = p.x - o.x, dy = p.y - o.y
+            if abs(dx) <= arm * 1.5, abs(dy) <= arm * 1.5, hypot(dx, dy) >= arm * 0.2 { return [.dpad] }
+        }
+        if shows(.face) {
+            let o = center(.face), reach = (56 + 30 * 1.6) * scale(.face)
+            if abs(p.x - o.x) <= reach, abs(p.y - o.y) <= reach { return [.face] }
         }
         return []
     }
 
-    /// The d-pad's directions held now.
-    private var dpadDirection: (up: Bool, down: Bool, left: Bool, right: Bool) = (false, false, false, false)
+    /// The face button nearest to p.
+    private func nearestFace(_ p: CGPoint) -> Face {
+        let o = center(.face), offset = 56 * scale(.face)
+        func d(_ f: (Face, CGPoint)) -> CGFloat { hypot(p.x - o.x - f.1.x * offset, p.y - o.y - f.1.y * offset) }
+        return Self.face.min { d($0) < d($1) }!.0
+    }
 
     private func update() {
-        var now: Set<Control> = []
+        var now: Set<PadControl> = []
+        var faces: Set<Face> = []
         var dir = (up: false, down: false, left: false, right: false)
         for (t, cs) in fingers {
             now.formUnion(cs)
+            let p = t.location(in: self)
+            if cs.contains(.face) { faces.insert(nearestFace(p)) }
             if cs.contains(.dpad) {
-                let p = t.location(in: self)
-                let angle = atan2(p.y - dpadCenter.y, p.x - dpadCenter.x)
+                let o = center(.dpad)
+                let angle = atan2(p.y - o.y, p.x - o.x)
                 // Eight ways: 0 is left, 2 up, 4 right, 6 down (the screen's +y is down).
                 switch Int(((angle + .pi) / (.pi / 4)).rounded()) % 8 {
                 case 0: dir.left = true
@@ -252,16 +339,17 @@ final class VirtualPadView: UIView {
                 }
             }
         }
-        if !now.subtracting(pressed).isEmpty || dir.up && !dpadDirection.up || dir.down && !dpadDirection.down
-            || dir.left && !dpadDirection.left || dir.right && !dpadDirection.right {
-            haptic.impactOccurred()
-        }
+        let newPress = !now.subtracting([.dpad, .face]).subtracting(pressed).isEmpty || !faces.subtracting(facePressed).isEmpty
+            || dir.up && !dpadDirection.up || dir.down && !dpadDirection.down
+            || dir.left && !dpadDirection.left || dir.right && !dpadDirection.right
+        if newPress && layout.haptics { haptic.impactOccurred() }
         pressed = now
+        facePressed = faces
         dpadDirection = dir
         var p = PadInput()
-        p.a = now.contains(.a); p.b = now.contains(.b); p.x = now.contains(.x); p.y = now.contains(.y)
-        p.leftShoulder = now.contains(.lb); p.rightShoulder = now.contains(.rb)
-        p.leftTrigger = now.contains(.lt) ? 1 : 0; p.rightTrigger = now.contains(.rt) ? 1 : 0
+        p.a = faces.contains(.a); p.b = faces.contains(.b); p.x = faces.contains(.x); p.y = faces.contains(.y)
+        p.leftShoulder = now.contains(.leftBumper); p.rightShoulder = now.contains(.rightBumper)
+        p.leftTrigger = now.contains(.leftTrigger) ? 1 : 0; p.rightTrigger = now.contains(.rightTrigger) ? 1 : 0
         p.menu = now.contains(.start); p.options = now.contains(.back); p.home = now.contains(.home)
         p.up = dir.up; p.down = dir.down; p.left = dir.left; p.right = dir.right
         // XInput's +y is up, the screen's down.
@@ -272,58 +360,108 @@ final class VirtualPadView: UIView {
         setNeedsDisplay()
     }
 
+    // MARK: editing
+
+    /// The control under p, the smallest first (Home over a stick's square).
+    private func control(at p: CGPoint) -> PadControl? {
+        func area(_ c: PadControl) -> CGFloat { frames[c].map { $0.width * $0.height } ?? 0 }
+        return PadControl.allCases.filter { frames[$0, default: .null].insetBy(dx: -6, dy: -6).contains(p) }
+            .min { area($0) < area($1) }
+    }
+
+    private func editBegan(_ touches: Set<UITouch>) {
+        guard drag == nil, let t = touches.first else { return }
+        let p = t.location(in: self)
+        guard let c = control(at: p) else {
+            selected = nil
+            onSelect?(nil)
+            return
+        }
+        let o = center(c)
+        drag = (t, c, CGPoint(x: o.x - p.x, y: o.y - p.y))
+        selected = c
+        onSelect?(c)
+    }
+
+    private func editMoved(_ touches: Set<UITouch>) {
+        guard let d = drag, touches.contains(d.touch), bounds.width > 0, bounds.height > 0 else { return }
+        let p = d.touch.location(in: self)
+        var place = layout[d.control]
+        place.x = Double((p.x + d.offset.x) / bounds.width)
+        place.y = Double((p.y + d.offset.y) / bounds.height)
+        layout[d.control] = place
+        onEdit?(layout)
+    }
+
     // MARK: drawing
 
     private static let rim = UIColor(white: 1, alpha: 0.28)
     private static let fill = UIColor(white: 1, alpha: 0.08)
     private static let lit = UIColor(white: 1, alpha: 0.32)
-    private static let faceColors: [Control: UIColor] = [
+    private static let faceColors: [Face: UIColor] = [
         .a: UIColor(red: 0.42, green: 0.80, blue: 0.27, alpha: 1), .b: UIColor(red: 0.90, green: 0.29, blue: 0.25, alpha: 1),
         .x: UIColor(red: 0.25, green: 0.52, blue: 0.95, alpha: 1), .y: UIColor(red: 0.98, green: 0.78, blue: 0.20, alpha: 1),
     ]
+    private static let faceLabels: [Face: String] = [.a: "A", .b: "B", .x: "X", .y: "Y"]
+    private static let accent = UIColor(red: 1, green: 0.72, blue: 0.2, alpha: 1)
 
     override func draw(_ rect: CGRect) {
-        let unit = min(bounds.width / 670, bounds.height / 470)
-        for (c, label) in [(Control.lt, "LT"), (.lb, "LB"), (.rb, "RB"), (.rt, "RT")] {
-            guard let r = rects[c] else { continue }
-            shape(UIBezierPath(roundedRect: r, cornerRadius: r.height / 2), on: pressed.contains(c))
-            text(label, at: CGPoint(x: r.midX, y: r.midY), size: 17 * unit)
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        for c in PadControl.allCases where shows(c) {
+            ctx.saveGState()
+            // Editing, a hidden control is drawn faint so it can be shown again.
+            if layout[c].hidden { ctx.setAlpha(0.3) }
+            draw(c)
+            ctx.restoreGState()
         }
-        for (c, label) in [(Control.back, "⧉"), (.home, "⌂"), (.start, "≡")] {
-            guard let r = rects[c] else { continue }
-            shape(UIBezierPath(ovalIn: r), on: pressed.contains(c))
-            text(label, at: CGPoint(x: r.midX, y: r.midY), size: 20 * unit)
-        }
-        stick(left, label: "L")
-        stick(right, label: "R")
-        // The d-pad: a plus, each arm lit when its direction is held.
-        let a = dpadArm, half = a * 0.36
-        let arms: [(CGRect, Bool)] = [
-            (CGRect(x: dpadCenter.x - half, y: dpadCenter.y - a, width: 2 * half, height: a - half), dpadDirection.up),
-            (CGRect(x: dpadCenter.x - half, y: dpadCenter.y + half, width: 2 * half, height: a - half), dpadDirection.down),
-            (CGRect(x: dpadCenter.x - a, y: dpadCenter.y - half, width: a - half, height: 2 * half), dpadDirection.left),
-            (CGRect(x: dpadCenter.x + half, y: dpadCenter.y - half, width: a - half, height: 2 * half), dpadDirection.right),
-        ]
-        shape(UIBezierPath(roundedRect: CGRect(x: dpadCenter.x - half, y: dpadCenter.y - half, width: 2 * half, height: 2 * half),
-                           cornerRadius: 2), on: false, rim: false)
-        for (r, on) in arms { shape(UIBezierPath(roundedRect: r, cornerRadius: 6 * unit), on: on) }
-        // Face buttons.
-        let face: [(Control, String, CGPoint)] = [
-            (.a, "A", CGPoint(x: 0, y: faceOffset)), (.b, "B", CGPoint(x: faceOffset, y: 0)),
-            (.x, "X", CGPoint(x: -faceOffset, y: 0)), (.y, "Y", CGPoint(x: 0, y: -faceOffset)),
-        ]
-        for (c, label, d) in face {
-            let center = CGPoint(x: faceCenter.x + d.x, y: faceCenter.y + d.y)
-            let r = CGRect(x: center.x - faceRadius, y: center.y - faceRadius, width: 2 * faceRadius, height: 2 * faceRadius)
-            let on = pressed.contains(c)
-            let color = Self.faceColors[c]!
-            color.withAlphaComponent(on ? 0.85 : 0.22).setFill()
-            UIBezierPath(ovalIn: r).fill()
-            color.withAlphaComponent(0.9).setStroke()
-            let path = UIBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1))
+        if editing, let c = selected, let f = frames[c] {
+            let path = UIBezierPath(roundedRect: f.insetBy(dx: -6, dy: -6), cornerRadius: 10)
             path.lineWidth = 2
+            path.setLineDash([6, 4], count: 2, phase: 0)
+            Self.accent.setStroke()
             path.stroke()
-            text(label, at: center, size: 22 * unit, color: on ? .black : color)
+        }
+    }
+
+    private func draw(_ c: PadControl) {
+        let s = scale(c), o = center(c)
+        switch c {
+        case .leftTrigger, .leftBumper, .rightBumper, .rightTrigger:
+            let r = frames[c] ?? .null
+            shape(UIBezierPath(roundedRect: r, cornerRadius: r.height / 2), on: pressed.contains(c))
+            text(c.title, at: o, size: 17 * s)
+        case .back, .home, .start:
+            shape(UIBezierPath(ovalIn: frames[c] ?? .null), on: pressed.contains(c))
+            text(c == .back ? "⧉" : c == .home ? "⌂" : "≡", at: o, size: 20 * s)
+        case .leftStick: stick(left, label: "L")
+        case .rightStick: stick(right, label: "R")
+        case .dpad:
+            // A plus, each arm lit when its direction is held.
+            let a = 64 * s, half = a * 0.36
+            let arms: [(CGRect, Bool)] = [
+                (CGRect(x: o.x - half, y: o.y - a, width: 2 * half, height: a - half), dpadDirection.up),
+                (CGRect(x: o.x - half, y: o.y + half, width: 2 * half, height: a - half), dpadDirection.down),
+                (CGRect(x: o.x - a, y: o.y - half, width: a - half, height: 2 * half), dpadDirection.left),
+                (CGRect(x: o.x + half, y: o.y - half, width: a - half, height: 2 * half), dpadDirection.right),
+            ]
+            shape(UIBezierPath(roundedRect: CGRect(x: o.x - half, y: o.y - half, width: 2 * half, height: 2 * half),
+                               cornerRadius: 2), on: false, rim: false)
+            for (r, on) in arms { shape(UIBezierPath(roundedRect: r, cornerRadius: 6 * s), on: on) }
+        case .face:
+            let offset = 56 * s, radius = 30 * s
+            for (f, d) in Self.face {
+                let center = CGPoint(x: o.x + d.x * offset, y: o.y + d.y * offset)
+                let r = CGRect(x: center.x - radius, y: center.y - radius, width: 2 * radius, height: 2 * radius)
+                let on = facePressed.contains(f)
+                let color = Self.faceColors[f]!
+                color.withAlphaComponent(on ? 0.85 : 0.22).setFill()
+                UIBezierPath(ovalIn: r).fill()
+                color.withAlphaComponent(0.9).setStroke()
+                let path = UIBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1))
+                path.lineWidth = 2
+                path.stroke()
+                text(Self.faceLabels[f]!, at: center, size: 22 * s, color: on ? .black : color)
+            }
         }
     }
 
