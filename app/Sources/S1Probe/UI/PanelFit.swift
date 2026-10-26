@@ -45,8 +45,10 @@ struct PanelFit<Content: View>: View {
                 .frame(width: full.width, height: full.height)
                 .ignoresSafeArea()
                 .onAppear { Self.log(full: full, insets: system, scale: scale) }
-                .onChange(of: full) { _, f in
-                    Self.log(full: f, insets: system, scale: scale)
+                // Another panel or a turn, not the frames of an animation (the home
+                // indicator's inset going away under a game's launch screen, say).
+                .onChange(of: PanelShape(full)) { _, _ in
+                    Self.log(full: full, insets: system, scale: scale)
                     AppDelegate.panelChanged()
                 }
         }
@@ -72,6 +74,18 @@ struct PanelFit<Content: View>: View {
 /// A plain key, not @Entry: the app's build loads no SwiftUI macro plugin (AGENTS.md).
 private struct PanelSideKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
+}
+
+/// A panel's shape to 50 points and which way it is turned: what changes when the app
+/// moves to another panel or turns, and stays put while an inset animates.
+private struct PanelShape: Equatable {
+    let width: Int
+    let landscape: Bool
+
+    init(_ size: CGSize) {
+        width = Int((size.width / 50).rounded())
+        landscape = size.width > size.height
+    }
 }
 
 extension EnvironmentValues {
