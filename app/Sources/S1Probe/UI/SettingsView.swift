@@ -330,6 +330,7 @@ private struct DownloadSettings: View {
 
 private struct ControllerSettings: View {
     @ObservedObject private var router = PadRouter.shared
+    @AppStorage(VirtualPadView.dpadOnTopKey) private var dpadOnTop = false
 
     var body: some View {
         SettingsNote(text: "Connect a controller in iOS Settings › Bluetooth. Playport and its games use the one you "
@@ -339,6 +340,11 @@ private struct ControllerSettings: View {
         }
         ForEach(Array(router.controllers.enumerated()), id: \.offset) { i, c in
             SettingsInfoRow(id: "controller:\(i)", title: c.name, subtitle: i == 0 ? "In use" : nil, value: battery(c))
+        }
+        // The on-screen controller a game can have on a foldable (VirtualGamepad.swift).
+        if Panel.isFoldable {
+            SettingsSwitchRow(id: "virtualPad:dpadOnTop", title: "Virtual gamepad: d-pad above the stick",
+                              subtitle: "PlayStation's layout; off is Xbox's, the left stick above", on: $dpadOnTop)
         }
         Color.clear.frame(height: 0).onAppear { router.refreshControllers() }
     }

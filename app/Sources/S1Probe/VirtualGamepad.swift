@@ -77,7 +77,12 @@ private struct VirtualPadControls: UIViewRepresentable {
 /// work at once and a finger slides from button to button: a stick follows the
 /// finger that went down on it; any other finger presses what it is over.
 /// A stick pressed again within 0.3 s of letting go is its click (LS, RS) while held.
+/// Xbox's layout, or PlayStation's with the left stick and the d-pad swapped
+/// (Settings › Controllers, dpadOnTopKey).
 final class VirtualPadView: UIView {
+    /// UserDefaults: the d-pad above the left stick.
+    static let dpadOnTopKey = "virtualPad.dpadOnTop"
+
     private enum Control: Hashable {
         case leftStick, rightStick, dpad
         case a, b, x, y, lb, rb, lt, rt, back, start, home
@@ -125,13 +130,16 @@ final class VirtualPadView: UIView {
         for (c, fx) in [(Control.back, 0.4), (.home, 0.5), (.start, 0.6)] {
             rects[c] = CGRect(x: w * fx - small / 2, y: my, width: small, height: small)
         }
-        // Xbox layout: left stick and face buttons high, d-pad and right stick low.
+        // Xbox layout: left stick and face buttons high, d-pad and right stick low;
+        // PlayStation's has the d-pad high and the left stick low.
         let upper = h * 0.44, lower = h * 0.76
-        left.center = CGPoint(x: w * 0.19, y: upper)
-        left.radius = 78 * unit
+        let high = CGPoint(x: w * 0.19, y: upper), low = CGPoint(x: w * 0.36, y: lower)
+        let dpadOnTop = UserDefaults.standard.bool(forKey: Self.dpadOnTopKey)
+        left.center = dpadOnTop ? low : high
+        left.radius = (dpadOnTop ? 70 : 78) * unit
         right.center = CGPoint(x: w * 0.64, y: lower)
         right.radius = 66 * unit
-        dpadCenter = CGPoint(x: w * 0.36, y: lower)
+        dpadCenter = dpadOnTop ? high : low
         dpadArm = 64 * unit
         faceCenter = CGPoint(x: w * 0.81, y: upper)
         faceOffset = 56 * unit
