@@ -627,6 +627,8 @@ final class PacedMetalLayer: CAMetalLayer {
         #if !PLAYPORT_RELEASE
         if drawable != nil { Self.countDrawable() }
         #endif
+        // The simulator's Metal has no presented handlers (the UI-only build, app/Xcode).
+        #if !targetEnvironment(simulator)
         drawable?.addPresentedHandler { d in
             if d.presentedTime > 0,
                let then = Self.firstPresent.withLockUnchecked({ h in defer { h = nil }; return h }) { then() }
