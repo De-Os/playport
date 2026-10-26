@@ -55,6 +55,23 @@ is the cover panel even while the app is on the inner one.
 - **Hollow Knight** (`app-367520`): plays, on the inner panel.
 - Memory: `limit 6144 MB`, phone 11571 MB; a title's limit 8192 MB.
 
+## Virtual gamepad (2026-10-27)
+
+A game's option on a foldable (Game options › Virtual gamepad): opened and held upright, the
+game takes the top half and an on-screen controller the bottom one, an XInput pad of its own
+(`virtual gamepad: XInput slot 0, layout "PlayStation"` at each launch). Its layouts (Xbox's,
+PlayStation's and the player's own: each control's place, size and whether it shows, and
+vibration on press) are in Settings › Virtual gamepad; a game picks one on its page, and the
+in-game menu takes the next or edits it in place.
+
+- **Hollow Knight** and **PEAK** played with it: face buttons, d-pad, shoulders, Start and the
+  stick clicks reached the game (`hostio: pad0 buttons=…`); the in-game menu opened from the
+  pad's Home and closed. The layout editor and switching layouts from the menu were checked by
+  hand on the phone.
+- The app starts upright on the inner panel held upright: Info.plist now lists portrait, since
+  iOS starts an app only in a listed orientation; the app delegate keeps the cover panel and
+  other iPhones landscape (Duo simulator folded and open, both ways; iPhone 18 Pro simulator).
+
 ## Not working: Mewgenics (`app-686060`)
 
 First frame at +3.59 s, then an access violation at +13 to +18 s, every launch: the game
