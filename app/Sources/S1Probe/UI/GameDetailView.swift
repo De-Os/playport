@@ -72,6 +72,8 @@ private struct GameDetailPage: View {
     @ObservedObject private var focus = PadFocus.shared
     @ObservedObject private var gog = GOGAccount.shared
     @ObservedObject private var epic = EpicAccount.shared
+    /// The page's width, for the narrow layout (page()).
+    @State private var pageWidth: CGFloat = 0
     @State private var playError: String?
     @State private var controllers = GCController.controllers().count
     @State private var stageOnDisk = false
@@ -259,6 +261,9 @@ private struct GameDetailPage: View {
     /// The page; under a panel only its art and name show (GameOptions.dc.html).
     private func page(_ t: InstalledTitle?, _ g: SteamGame?) -> some View {
         let under = !navigation.gamePanels.isEmpty
+        // A narrow page (an iPhone Duo's cover panel, UI/PanelFit.swift) gives the buttons
+        // the width the facts beside them would take: a slimmer facts column, closer.
+        let narrow = pageWidth > 0 && pageWidth < 760
         return ZStack(alignment: .topLeading) {
             // The hero art fills the screen behind the page and its footer: the shell draws
             // it (PageArt), as the launch screen does, so on Play it does not change.
@@ -270,7 +275,7 @@ private struct GameDetailPage: View {
                                 ?? gogGame.map { PageArt(appID: nil, name: $0.title, info: nil, storeKey: StoreGameKey(store: .gog, id: $0.id)) }
                                 ?? epicGame.map { PageArt(appID: nil, name: $0.title, info: nil, storeKey: StoreGameKey(store: .epic, id: $0.id)) })
 
-            HStack(alignment: .top, spacing: 24) {
+            HStack(alignment: .top, spacing: narrow ? 16 : 24) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(name).font(PP.display(48)).foregroundStyle(PP.text)
                         .lineLimit(1).minimumScaleFactor(0.5)
@@ -292,13 +297,14 @@ private struct GameDetailPage: View {
                 .frame(maxWidth: 500, alignment: .leading)
                 Spacer(minLength: 0)
                 facts(t, g)
-                    .frame(width: 270)
+                    .frame(width: narrow ? 220 : 270)
                     .padding(.top, 94)
                     .opacity(under ? 0 : 1)
             }
             .padding(.top, 76)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
     }
 
     private func subtitle(_ t: InstalledTitle?, _ g: SteamGame?) -> String? {
@@ -1177,7 +1183,7 @@ private struct PrimaryButton: View {
     var body: some View {
         HStack(spacing: 10) {
             PadGlyph(button: .a, inverted: enabled)
-            Text(title).font(PP.display(20)).lineLimit(1)
+            Text(title).font(PP.display(20)).lineLimit(1).fixedSize()
         }
         .foregroundStyle(enabled ? PP.onAccent : PP.muted)
         .padding(.leading, 14).padding(.trailing, 26)
@@ -1200,7 +1206,7 @@ private struct SecondaryButton: View {
     var body: some View {
         HStack(spacing: 8) {
             if let systemImage { Image(systemName: systemImage).font(.system(size: 14)) }
-            Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+            Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1).fixedSize()
             if let glyph { PadGlyph(button: glyph).padding(.leading, 2) }
         }
         .foregroundStyle(enabled ? PP.text : PP.muted)
