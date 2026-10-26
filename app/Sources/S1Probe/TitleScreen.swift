@@ -32,10 +32,12 @@ enum TitleScreen {
     /// `frameLimit` the player's limit, 0 for none.
     @MainActor
     static func configure(title: String? = nil, frameLimit: Int = 0) {
-        // The panel the app is on now (Panel.swift): a foldable has two.
+        // The panel the app is on now (Panel.swift): a foldable has two. Its long side is
+        // the guest's width even when a foldable's inner panel is held upright (VirtualGamepad).
         let px = Panel.pixels
         let screen: String
-        if let (w, h) = Display.guestSize(panelLong: Int(px.width), panelShort: Int(px.height), spec: title) {
+        if let (w, h) = Display.guestSize(panelLong: Int(max(px.width, px.height)),
+                                             panelShort: Int(min(px.width, px.height)), spec: title) {
             setenv("MADEIRA_SCREEN_W", String(w), 1)
             setenv("MADEIRA_SCREEN_H", String(h), 1)
             screen = "\(w)x\(h)" + (title.map { " (the title's screen \($0))" } ?? "")

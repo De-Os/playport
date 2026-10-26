@@ -186,10 +186,9 @@ final class HostIO {
         #endif
     }
 
-    #if !PLAYPORT_RELEASE
-    /// A pad slot for something other than a GameController pad (Dev/VirtualPad.swift).
+    /// A pad slot for something other than a GameController pad (VirtualGamepad.swift,
+    /// Dev/VirtualPad.swift).
     func connectSlot(_ id: ObjectIdentifier) -> Int? { slots.connect(id) }
-    #endif
 
     // MARK: lifecycle
 
@@ -702,9 +701,13 @@ final class GameSurfaceView: UIView {
         // leaving it at 1 makes a native-pixel swapchain permanently suboptimal
         // (912x420 points versus 2736x1260 pixels on a 3x screen).
         contentScaleFactor = window.screen.nativeScale
-        // Landscape before the runtime starts, so the swap chain is made at the final size.
+        // Landscape before the runtime starts, so the swap chain is made at the final size;
+        // a foldable's inner panel stays as it is held when the virtual gamepad can go under
+        // the game (VirtualGamepad.swift: the guest's screen is the panel's long side wide).
         window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        window.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+        if !(VirtualGamepad.shared.enabled && Panel.isLarge(window.screen)) {
+            window.windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .landscape))
+        }
         if !registered, let layer = layer as? CAMetalLayer {
             registered = true
             HostIO.shared.gameLayer = layer

@@ -54,8 +54,9 @@ struct RootView: View {
     var body: some View {
         ZStack {
             if launch.running {
-                // A title started from the library: the whole screen is the guest's swap chain (HostIO.swift).
-                GameSurface().ignoresSafeArea()
+                // A title started from the library: the whole screen is the guest's swap chain (HostIO.swift),
+                // or its top half over the virtual gamepad (VirtualGamepad.swift).
+                GameArea().ignoresSafeArea()
                     // Under the launch screen, covered black; on the first frame it fades in at its
                     // own size as the launch screen flies off (UI/LaunchTransition.swift). A cover,
                     // not the Metal layer's own opacity: the game presents into it all along.

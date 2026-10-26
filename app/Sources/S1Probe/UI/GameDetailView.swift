@@ -665,7 +665,8 @@ private struct GameDetailPage: View {
 
     private var context: String { name }
 
-    // Graphics: aspect ratio, resolution, frame rate limit, Direct3D, launch arguments.
+    // Graphics: aspect ratio, resolution, frame rate limit, Direct3D, launch arguments,
+    // and on a foldable the virtual gamepad.
     @ViewBuilder
     private func graphicsRows(_ t: InstalledTitle) -> some View {
         let settings = launchSettings.binding(for: t.id)
@@ -747,6 +748,16 @@ private struct GameDetailPage: View {
                reset: args.isEmpty ? nil : { settings.wrappedValue.arguments = "" }) {
             PadModal.shared.keyboard(title: "Launch arguments", text: own.arguments, placeholder: "For example -DX12",
                                      maxLength: 200) { settings.wrappedValue.arguments = $0 }
+        }
+        // A foldable's open panel held upright: the game above, a controller under it (VirtualGamepad.swift).
+        if Panel.isFoldable {
+            let padOn = own.virtualPad ?? false
+            PadRow(id: "opt:virtualPad", title: "Virtual gamepad",
+                   subtitle: "Phone open and upright: the game above, a controller below",
+                   accessory: .toggle(padOn), changed: padOn, style: .plain, hint: padOn ? "Turn off" : "Turn on",
+                   reset: padOn ? { settings.wrappedValue.virtualPad = nil } : nil) {
+                settings.wrappedValue.virtualPad = padOn ? nil : true
+            }
         }
     }
 

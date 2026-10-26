@@ -54,11 +54,16 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
     /// (LaunchSettings.graphicsVariables) or a DXVK option (`dxvk.tilerMode=False`), which
     /// goes into DXVK_CONFIG. LaunchSettings.graphicsEnvironment parses them.
     public var graphicsOptions: String
+    /// On a foldable's inner panel held upright (iPhone Duo), the game in the top half
+    /// and an on-screen controller in the bottom one, an XInput pad (per game only);
+    /// nil is off.
+    public var virtualPad: Bool?
 
     public init(screen: String? = nil, aspect: String? = nil, frameLimit: Int? = nil, graphics: GraphicsBackend? = nil,
                 arguments: String = "", steamAPI: SteamAPISwap.Mode? = nil,
                 cloudSync: Bool? = nil, ordering: MemoryOrdering = MemoryOrdering(), maxInst: Int? = nil,
-                x87Reduced: Bool? = nil, diskCache: Bool? = nil, runtime: String = "", graphicsOptions: String = "") {
+                x87Reduced: Bool? = nil, diskCache: Bool? = nil, runtime: String = "", graphicsOptions: String = "",
+                virtualPad: Bool? = nil) {
         self.screen = screen
         self.aspect = aspect
         self.frameLimit = frameLimit
@@ -72,6 +77,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         self.diskCache = diskCache
         self.runtime = runtime
         self.graphicsOptions = graphicsOptions
+        self.virtualPad = virtualPad
     }
 
     public init(from decoder: Decoder) throws {
@@ -91,6 +97,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         diskCache = try c.decodeIfPresent(Bool.self, forKey: .diskCache)
         runtime = try c.decodeIfPresent(String.self, forKey: .runtime) ?? ""
         graphicsOptions = try c.decodeIfPresent(String.self, forKey: .graphicsOptions) ?? ""
+        virtualPad = try c.decodeIfPresent(Bool.self, forKey: .virtualPad)
     }
 
     public var isEmpty: Bool {
@@ -98,7 +105,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
             && arguments.trimmingCharacters(in: .whitespaces).isEmpty && steamAPI == nil && cloudSync == nil
             && ordering.isEmpty && maxInst == nil && x87Reduced == nil && diskCache == nil
             && runtime.trimmingCharacters(in: .whitespaces).isEmpty
-            && graphicsOptions.trimmingCharacters(in: .whitespaces).isEmpty
+            && graphicsOptions.trimmingCharacters(in: .whitespaces).isEmpty && virtualPad == nil
     }
 
     /// Arguments as a command line splits them: at spaces, except inside
@@ -182,12 +189,14 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
         public var runtime: [String: String]
         /// The Vulkan layers' variables from the game's Graphics options; empty for none.
         public var graphicsEnvironment: [String: String]
+        /// The on-screen controller under the game on a foldable's open panel held upright.
+        public var virtualPad: Bool
 
         public init(screen: String?, aspect: ScreenAspect = .phone, frameLimit: Int, graphics: GraphicsBackend = .default,
                     arguments: [String] = [], steamAPI: SteamAPISwap.Mode = .emulated,
                     ordering: MemoryOrdering = MemoryOrdering(), maxInst: Int? = nil,
                     x87Reduced: Bool? = nil, diskCache: Bool? = nil, runtime: [String: String] = [:],
-                    graphicsEnvironment: [String: String] = [:]) {
+                    graphicsEnvironment: [String: String] = [:], virtualPad: Bool = false) {
             self.screen = screen
             self.aspect = aspect
             self.frameLimit = frameLimit
@@ -200,6 +209,7 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
             self.diskCache = diskCache
             self.runtime = runtime
             self.graphicsEnvironment = graphicsEnvironment
+            self.virtualPad = virtualPad
         }
 
         /// The guest screen's spec for HostIOKit Display.guestSize: the resolution in the shape
@@ -240,7 +250,8 @@ public struct LaunchSettings: Codable, Equatable, Sendable {
                          maxInst: game?.maxInst.flatMap { FEXProfile.validBlockSize($0) ? $0 : nil },
                          x87Reduced: game?.x87Reduced, diskCache: game?.diskCache,
                          runtime: runtimeKeys(game?.runtime ?? "") ?? [:],
-                         graphicsEnvironment: graphicsEnvironment(game?.graphicsOptions ?? "") ?? [:])
+                         graphicsEnvironment: graphicsEnvironment(game?.graphicsOptions ?? "") ?? [:],
+                         virtualPad: game?.virtualPad ?? false)
     }
 
     /// The resolutions the pickers offer, the same in every aspect ratio, as screen specs;

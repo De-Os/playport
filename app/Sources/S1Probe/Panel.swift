@@ -37,6 +37,22 @@ enum Panel {
         return min(screen.bounds.width, screen.bounds.height) >= 600
     }
 
+    /// A foldable (an iPhone Duo): the model is one, or the app is on a large panel now.
+    /// The cover panel alone is an ordinary iPhone's size, so the model decides while folded.
+    static var isFoldable: Bool {
+        foldableModels.contains(model)
+            || UIApplication.shared.connectedScenes.contains { isLarge(($0 as? UIWindowScene)?.screen) }
+    }
+    private static let foldableModels: Set<String> = ["iPhone19,4"]
+
+    /// The device's model identifier (`iPhone19,4`); the simulated device's in the simulator.
+    static var model: String {
+        if let sim = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return sim }
+        var info = utsname()
+        uname(&info)
+        return withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+    }
+
     /// The highest refresh rate of the panel the scene is on.
     static var maximumFramesPerSecond: Int {
         (scene?.screen ?? UIScreen.main).maximumFramesPerSecond
@@ -44,9 +60,6 @@ enum Panel {
 
     /// One line for the logs: the device model, the panel and the window.
     static var summary: String {
-        var info = utsname()
-        uname(&info)
-        let model = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
         let screen = (scene?.screen ?? UIScreen.main).nativeBounds.size
         let px = pixels
         return "\(model) panel \(Int(screen.width))x\(Int(screen.height)) px, window \(Int(px.width))x\(Int(px.height)) px"
