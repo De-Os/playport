@@ -136,14 +136,32 @@ enum LaunchFix {
 struct GameHeroArt<Art: View>: View {
     @ViewBuilder let art: Art
 
+    /// The widest band the art fills, width to height. A store's hero art is about
+    /// 3:1; filling a whole panel nearer square (an iPhone Duo's, about 1.45:1) would
+    /// crop away more than half its width. There the art fills a band this shape at
+    /// the top and fades into the page; a landscape iPhone (about 2.2:1) is unchanged.
+    static var band: CGFloat { 2 }
+
     var body: some View {
-        ZStack {
-            Color(hex: 0x131C2B)
-            art
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-                .opacity(0.28)
-            LinearGradient(colors: [.clear, Color(hex: 0x05070A).opacity(0.7)], startPoint: .top, endPoint: .bottom)
+        GeometryReader { geo in
+            let size = geo.size
+            let height = size.width / size.height < Self.band ? size.width / Self.band : size.height
+            ZStack(alignment: .top) {
+                Color(hex: 0x131C2B)
+                art
+                    .frame(width: size.width, height: height)
+                    .clipped()
+                    .mask {
+                        if height < size.height {
+                            LinearGradient(colors: [.black, .black, .clear], startPoint: .top, endPoint: .bottom)
+                        } else {
+                            Color.black
+                        }
+                    }
+                    .opacity(0.28)
+                LinearGradient(colors: [.clear, Color(hex: 0x05070A).opacity(0.7)], startPoint: .top, endPoint: .bottom)
+            }
+            .frame(width: size.width, height: size.height)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

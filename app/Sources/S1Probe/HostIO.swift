@@ -636,6 +636,7 @@ final class PacedMetalLayer: CAMetalLayer {
             let readable = Self.readable(t)
             Self.shown.withLockUnchecked { $0 = readable }
         }
+        #endif
         if let then = Self.firstFrame.withLockUnchecked({ h in defer { h = nil }; return h }) { then() }
         return drawable
     }
@@ -680,7 +681,18 @@ final class GameSurfaceView: UIView {
         windows.frame = bounds
         windows.setNeedsLayout()
         CATransaction.commit()
+        // A foldable (Panel.swift) moves the app between its panels without a
+        // rotation: follow the new panel's scale, and its safe area for the
+        // views over the game (WindowInsets reads it only on a rotation).
+        if bounds.size != laidOutSize {
+            laidOutSize = bounds.size
+            if let screen = window?.screen, contentScaleFactor != screen.nativeScale {
+                contentScaleFactor = screen.nativeScale
+            }
+            WindowInsets.shared.read()
+        }
     }
+    private var laidOutSize = CGSize.zero
 
     override func didMoveToWindow() {
         super.didMoveToWindow()

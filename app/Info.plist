@@ -26,6 +26,10 @@
 	<string>Playport</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- A game keeps the whole panel: no Split View beside another app on a
+	     foldable's inner panel (iPhone Duo; Sources/S1Probe/Panel.swift). -->
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<!-- The app delegate narrows these per launch: landscape for a title, portrait otherwise. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

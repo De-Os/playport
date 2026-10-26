@@ -51,12 +51,19 @@ struct SettingsView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var scrollOffset: CGFloat = 0
 
+    /// The page's width, for the narrow layout below.
+    @State private var width: CGFloat = 0
+
     var body: some View {
-        HStack(alignment: .top, spacing: 22) {
-            sidebar.frame(width: 190)
+        // A narrow page (an iPhone Duo's cover panel, UI/PanelFit.swift) keeps more of its
+        // width for the section: a slimmer list and margins.
+        let narrow = width > 0 && width < 760
+        HStack(alignment: .top, spacing: narrow ? 16 : 22) {
+            sidebar.frame(width: narrow ? 150 : 190)
             content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .padding(.horizontal, 44).padding(.top, 12)
+        .padding(.horizontal, narrow ? 20 : 44).padding(.top, 12)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         // The height the shell offers, from the top: a sidebar a few points taller must
         // not push the shell's footer off its place.
         .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
