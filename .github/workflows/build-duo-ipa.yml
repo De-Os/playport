@@ -1,0 +1,169 @@
+name: Build unsigned iPhone Duo IPA
+on:
+  workflow_dispatch:
+  push:
+    paths: ['.github/workflows/build-duo-ipa.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  sdk:
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - name: Pack Xcode SDKs for the Linux build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for i in {1..90}; do
+            gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n recipient -D "$RUNNER_TEMP/pub" && break
+            sleep 10
+          done
+          test -s "$RUNNER_TEMP/pub/key.pem"
+          export TRANSFER_KEY=$(openssl rand -hex 32)
+          printf %s "$TRANSFER_KEY" | openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/pub/key.pem" -out key.enc
+          echo "Exporting iPhoneOS SDK $(xcrun --sdk iphoneos --show-sdk-version) from $(xcrun --sdk iphoneos --show-sdk-path)"
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = 27.1
+          for pair in 'iphoneos iPhoneOS' 'macosx MacOSX'; do
+            set -- $pair
+            dest="sdk/Developer/Platforms/$2.platform/Developer/SDKs/$2"26.5.sdk
+            mkdir -p "$(dirname "$dest")"
+            cp -a "$(realpath "$(xcrun --sdk "$1" --show-sdk-path)")" "$dest"
+          done
+          tar czf - sdk | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -pass env:TRANSFER_KEY -out sdk.enc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdk-transfer
+          path: |
+            sdk.enc
+            key.enc
+          retention-days: 1
+          compression-level: 0
+  runtime:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: f7e27d14fd08ab289511df8bf79649785086d361
+          persist-credentials: false
+      - name: Generate temporary SDK transfer key
+        run: |
+          openssl genrsa -out "$RUNNER_TEMP/private.pem" 3072
+          openssl pkey -in "$RUNNER_TEMP/private.pem" -pubout -out "$RUNNER_TEMP/key.pem"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: recipient
+          path: ${{ runner.temp }}/key.pem
+          retention-days: 1
+      - name: Receive encrypted SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in {1..90}; do
+            gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n sdk-transfer -D /tmp/transfer && break
+            sleep 10
+          done
+          test -s /tmp/transfer/sdk.enc
+      - name: Unpack SDK
+        run: |
+          set -euo pipefail
+          export TRANSFER_KEY=$(openssl pkeyutl -decrypt -inkey "$RUNNER_TEMP/private.pem" -in /tmp/transfer/key.enc)
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:TRANSFER_KEY -in /tmp/transfer/sdk.enc | tar xzf - -C /tmp/transfer
+      - uses: actions/cache/restore@v4
+        id: build-cache
+        with:
+          path: |
+            .work
+            app/Staged
+            app/Sources/S1Probe/Runtime
+            app/Sources/WinIOS
+          key: duo-arm64-f7e27d1-sdk271-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: duo-arm64-f7e27d1-sdk271-v1-
+      - name: Build runtime and stage phone resources
+        run: |
+          set -euo pipefail
+          docker build -t playport-build build/docker
+          docker run --rm -v "$PWD:/w/playport" -v /tmp/transfer/sdk:/w/sdk -w /w/playport playport-build bash -euo pipefail -c '
+            chown -R "$(id -u):$(id -g)" /w/playport
+            python3 build/docker/sdk-tbd.py /w/sdk
+            bash build/docker/llvm-mingw.sh /w/playport/.work/inputs/llvm-mingw
+            ./pp setup --llvm-mingw /w/playport/.work/inputs/llvm-mingw --darwin-sdk /w/sdk --usbmux-socket /tmp/playport-ci-usbmux.sock
+            printf "#!/bin/sh\n# INCREASED_MEMORY_LIMIT\nexit 1\n" > /w/xtool-stub
+            chmod +x /w/xtool-stub
+            export PREMAKE5=/w/playport/.work/run/steamapi/gbe/third-party/common/linux/premake-arm/premake5
+            XTOOL=/w/xtool-stub ./pp build --to notices
+            cp .work/run/unix/linktest/libwineserver-ws4.a app/Staged/lib/libwineserver.a
+            tar czf staged.tgz app/Staged app/Sources/S1Probe/Runtime app/Sources/WinIOS
+          '
+      - name: Make logs and build state readable
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .work app/Staged app/Sources/S1Probe/Runtime app/Sources/WinIOS
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            .work
+            app/Staged
+            app/Sources/S1Probe/Runtime
+            app/Sources/WinIOS
+          key: duo-arm64-f7e27d1-sdk271-v1-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-diagnostics
+          path: |
+            .work/run/logs/
+            .work/run/**/*.log
+          include-hidden-files: true
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phone-resources
+          path: staged.tgz
+          retention-days: 2
+          compression-level: 0
+  ipa:
+    needs: runtime
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: f7e27d14fd08ab289511df8bf79649785086d361
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: phone-resources
+      - name: Generate project and package device app
+        run: |
+          set -euo pipefail
+          tar xzf staged.tgz
+          APP="$PWD/app"
+          export APP
+          sed -n '/^cat > /,/^EOF$/p; /^for n in KosmicKrisp/,/^done$/p' app/Xcode/sync-staged.sh | bash -e
+          brew install xcodegen
+          cd app/Xcode
+          cp Local.xcconfig.example Local.xcconfig
+          xcodegen
+          xcodebuild -project Playport.xcodeproj -scheme Playport -configuration Release -destination generic/platform=iOS -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build
+          product="$RUNNER_TEMP/derived/Build/Products/Release-iphoneos/S1Probe.app"
+          test -d "$product/PlugIns/PlayportJIT.appex"
+          cd "$GITHUB_WORKSPACE"
+          mkdir Payload
+          ditto "$product" Payload/S1Probe.app
+          ditto -c -k --keepParent Payload Playport-Duo-unsigned.ipa
+          unzip -tq Playport-Duo-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Playport-Duo-unsigned
+          path: Playport-Duo-unsigned.ipa
+          if-no-files-found: error
+
+
+
