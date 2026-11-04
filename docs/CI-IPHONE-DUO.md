@@ -46,7 +46,6 @@ The repository-specific predecessor completed here:
 https://github.com/KevZhi/playport/actions/runs/41866894102
 
 It took 2h 27m 34s (runtime approximately 2h 21m, macOS IPA packaging 5m 47s).
-KevZhi reports successful operation on an iPhone Duo running iOS 27.3 after
-personal development signing. No comprehensive game or performance test is claimed.
+KevZhi confirms installation, launch and entry to the main screen on iPhone Duo / iOS 27.3 after personal development signing. No game has been tested; JIT readiness and gameplay are not verified.
 The workflow in this PR replaces the predecessor's hard-coded repository with
 `github.repository`; that generalized revision has not been rebuilt end-to-end.
